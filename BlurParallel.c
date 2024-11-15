@@ -167,21 +167,34 @@ void initialize_mask() {
 }
 
 int main() {
+
+    char* fileDirectory = "../DataSet";
+    char command[256];
+
+    snprintf(command, sizeof(command), "test -d \"%s\"", fileDirectory);
+    
+    if(system(command)){
+      printf("DataSet Doesn't exist\n");
+    }
+    
     printf("Enter the size of Mask:\n");
     scanf("%d", &maskDimensions);
-    system("mkdir -p BlurImages");
 
-    double startTime = omp_get_wtime();
     initialize_mask();
+    double startReadTime = omp_get_wtime();
 
     // Step 1: Read all images
     #pragma omp parallel for
     for (int i = 0; i < IMAGESNO; i++) {
         char inputFilename[100];
-        sprintf(inputFilename, "DataSet/%d.png", i + 1);
+        sprintf(inputFilename, "%s/%d.png",fileDirectory, i + 1);
         read_png_file(inputFilename, &images[i]);
     }
-
+    double ReadTime = omp_get_wtime() - startReadTime;
+    printf("Time Taken For reading images: %lf\n",ReadTime);
+    
+    double startProcessTime = omp_get_wtime();
+    
     // Step 2: Process all images
     #pragma omp parallel for
     for (int i = 0; i < IMAGESNO; i++) {
@@ -202,9 +215,11 @@ int main() {
         free(images[i].row_pointers);
     }
 
-    double endTime = omp_get_wtime();
-    printf("Time taken is %lf seconds\n", endTime - startTime);
-
+    double ProcessTime = omp_get_wtime() - startProcessTime;
+    printf("Time taken For Image Processing: %lf seconds\n", ProcessTime);
+    
+    printf("Total Time taken : %lf seconds\n", ProcessTime + ReadTime);
+    
     // Free mask matrix
     for (int i = 0; i < maskDimensions; i++) {
         free(maskMatrix[i]);

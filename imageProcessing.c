@@ -16,11 +16,27 @@ typedef struct {
 
 int maskDimensions;
 int **maskMatrix;
-ImageData images[IMAGESNO];  // Array to store all images' data
+ImageData images[IMAGESNO];      // Array to store all original images' data
+ImageData blurImages[IMAGESNO]; // Array to store images for blurring
+ImageData negateImages[IMAGESNO]; // Array to store images for negation
 
 // Custom warning handler to suppress warnings
 void custom_warning_handler(png_structp png_ptr, png_const_charp warning_msg) {
     // Suppress warning messages
+}
+
+// Function to copy image data
+void copy_image_data(ImageData *src, ImageData *dest) {
+    dest->width = src->width;
+    dest->height = src->height;
+    dest->color_type = src->color_type;
+    dest->bit_depth = src->bit_depth;
+
+    dest->row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * dest->height);
+    for (int y = 0; y < dest->height; y++) {
+        dest->row_pointers[y] = (png_byte*)malloc(dest->width * 4); // Assuming RGBA
+        memcpy(dest->row_pointers[y], src->row_pointers[y], dest->width * 4);
+    }
 }
 
 // Function to read a single PNG file into ImageData struct
@@ -99,6 +115,20 @@ void write_png_file(char *filename, ImageData *img) {
     png_destroy_write_struct(&png, &info);
 }
 
+// Function to invert colors of an image
+void invert_colors(ImageData *img) {
+    #pragma omp parallel for
+    for (int y = 0; y < img->height; y++) {
+        png_bytep row = img->row_pointers[y];
+        for (int x = 0; x < img->width; x++) {
+            png_bytep px = &(row[x * 4]);
+            px[0] = 255 - px[0];  // Invert Red
+            px[1] = 255 - px[1];  // Invert Green
+            px[2] = 255 - px[2];  // Invert Blue
+        }
+    }
+}
+
 // Function to apply a mask for blurring effect on an image
 void maskRGB(ImageData *img) {
     int maskD = maskDimensions * maskDimensions;
@@ -167,45 +197,60 @@ void initialize_mask() {
 }
 
 int main() {
+    char* fileDirectory = "../DataSet";
+    char command[256];
+
+    snprintf(command, sizeof(command), "test -d \"%s\"", fileDirectory);
+    if (system(command)) {
+        printf("DataSet Doesn't exist\n");
+        return 1;
+    }
+    
     printf("Enter the size of Mask:\n");
     scanf("%d", &maskDimensions);
+    
+    system("mkdir -p NegationImages");
     system("mkdir -p BlurImages");
-
+    
     double startTime = omp_get_wtime();
+
+    #pragma omp parallel for
+    for (int i = 0; i < IMAGESNO; i++) {
+        char fileName[100];
+        sprintf(fileName, "%s/%d.png", fileDirectory, i + 1);
+        read_png_file(fileName, &images[i]);
+        copy_image_data(&images[i], &negateImages[i]);
+        copy_image_data(&images[i], &blurImages[i]);
+    }
+
     initialize_mask();
 
-    // Step 1: Read all images
-    #pragma omp parallel for
-    for (int i = 0; i < IMAGESNO; i++) {
-        char inputFilename[100];
-        sprintf(inputFilename, "DataSet/%d.png", i + 1);
-        read_png_file(inputFilename, &images[i]);
-    }
-
-    // Step 2: Process all images
-    #pragma omp parallel for
-    for (int i = 0; i < IMAGESNO; i++) {
-        maskRGB(&images[i]);
-    }
-
-    // Step 3: Write all images
-    #pragma omp parallel for
-    for (int i = 0; i < IMAGESNO; i++) {
-        char outputFilename[100];
-        sprintf(outputFilename, "BlurImages/%d.png", i + 1);
-        write_png_file(outputFilename, &images[i]);
-
-        // Free memory allocated for row pointers of each image
-        for (int y = 0; y < images[i].height; y++) {
-            free(images[i].row_pointers[y]);
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        {
+            for (int i = 0; i < IMAGESNO; i++) {
+                invert_colors(&negateImages[i]);
+                char outputFilename[100];
+                sprintf(outputFilename, "NegationImages/%d.png", i + 1);
+                write_png_file(outputFilename, &negateImages[i]);
+            }
         }
-        free(images[i].row_pointers);
+
+        #pragma omp section
+        {
+            for (int i = 0; i < IMAGESNO; i++) {
+                maskRGB(&blurImages[i]);
+                char outputFilename[100];
+                sprintf(outputFilename, "BlurImages/%d.png", i + 1);
+                write_png_file(outputFilename, &blurImages[i]);
+            }
+        }
     }
 
     double endTime = omp_get_wtime();
-    printf("Time taken is %lf seconds\n", endTime - startTime);
+    printf("Execution time: %.2f seconds\n", endTime - startTime);
 
-    // Free mask matrix
     for (int i = 0; i < maskDimensions; i++) {
         free(maskMatrix[i]);
     }

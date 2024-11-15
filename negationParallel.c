@@ -16,6 +16,10 @@ typedef struct {
 
 ImageData img[IMAGESNO];  
 
+void custom_warning_handler(png_structp png_ptr, png_const_charp warning_msg) {
+    // Suppress warning messages
+}
+
 void read_png_file(char *filename, ImageData *img) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) abort();
@@ -23,6 +27,8 @@ void read_png_file(char *filename, ImageData *img) {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) abort();
 
+    png_set_error_fn(png, NULL, NULL, custom_warning_handler);
+    x
     png_infop info = png_create_info_struct(png);
     if (!info) abort();
 
@@ -108,7 +114,14 @@ void invert_colors(ImageData *img) {
 }
 
 int main() {
+    char* fileDirectory = "../DataSet";
+    char command[256];
 
+    snprintf(command, sizeof(command), "test -d \"%s\"", fileDirectory);
+    
+    if(system(command)){
+      printf("DataSet Doesn't exist\n");
+    }
     system("mkdir -p NegationImages");
     
     double totalReadTime = 0.0;
@@ -118,7 +131,7 @@ int main() {
     double readStart = omp_get_wtime();
     for (int i = 0; i < IMAGESNO ; i++) {
         char inputFilename[25];
-        sprintf(inputFilename, "DataSet/%d.png", i + 1);
+        sprintf(inputFilename, "%s/%d.png",fileDirectory, i + 1);
         read_png_file(inputFilename, &img[i]);
     }
     double readEnd = omp_get_wtime();
