@@ -9,7 +9,7 @@ BUILD_DIR = build
 OUT_DIR = BlurImages
 
 # Input and Output source_file names
-SRC = $(SRC_DIR)/Blur.c
+SRC = $(SRC_DIR)/imageProcessing.c
 EXEC = image_blur
 
 # All images processing target

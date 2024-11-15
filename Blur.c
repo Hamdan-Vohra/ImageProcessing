@@ -1,269 +1,215 @@
-/*
-  Basic Image Processing Library using OpenMp
-  Task : Sequential Image blurring operation in C language on png images
-
-  Team Trident 
-  Rushikesh Korde 2017BTECS00053
-  Saurabh Zade 2017BTECS00077 
-  Rahul Sonone 2017BTECS00103
-
-
-
-*/
 #include <stdlib.h>
 #include <stdio.h>
-#include<string.h>
+#include <string.h>
 #include <png.h>
-#include<omp.h>
+#include <omp.h>
 
-int width,height;
-png_byte color_type;
-png_byte bit_depth;
-png_bytep *row_pointers = NULL;
+#define IMAGESNO 4265
+
+typedef struct {
+    int width;
+    int height;
+    png_byte color_type;
+    png_byte bit_depth;
+    png_bytep *row_pointers;
+} ImageData;
+
 int maskDimensions;
 int **maskMatrix;
-void read_png_file(char *filename) {
-  FILE *fp = fopen(filename, "rb");
+ImageData images[IMAGESNO];  // Array to store all images' data
 
-  png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-  if(!png) abort();
-
-  png_infop info = png_create_info_struct(png);
-  if(!info) abort();
-
-  if(setjmp(png_jmpbuf(png))) abort();
-
-  png_init_io(png, fp);
-  
-  png_read_info(png, info);
-
-  width     = png_get_image_width(png, info);
-  height    = png_get_image_height(png, info);
-
-  color_type = png_get_color_type(png, info);
-  bit_depth  = png_get_bit_depth(png, info);
-
-  // Read any color_type into 8bit depth, RGBA format.
-  // See http://www.libpng.org/pub/png/libpng-manual.txt
-
-  if(bit_depth == 16)
-    png_set_strip_16(png);
-
-  if(color_type == PNG_COLOR_TYPE_PALETTE)
-    png_set_palette_to_rgb(png);
-
-  
-
-  // PNG_COLOR_TYPE_GRAY_ALPHA is always 8 or 16bit depth.
-  if(color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
-    png_set_expand_gray_1_2_4_to_8(png);
-
-  if(png_get_valid(png, info, PNG_INFO_tRNS))
-    png_set_tRNS_to_alpha(png);
-
-  // These color_type don't have an alpha channel then fill it with 0xff.
-  if(color_type == PNG_COLOR_TYPE_RGB ||
-     color_type == PNG_COLOR_TYPE_GRAY ||
-     color_type == PNG_COLOR_TYPE_PALETTE)
-    png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
-  if(color_type == PNG_COLOR_TYPE_GRAY ||
-     color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
-    png_set_gray_to_rgb(png);
-
-  png_read_update_info(png, info);
-
-  //if (row_pointers) abort();
-
-  row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * height);
-  for(int y = 0; y < height; y++) {
-    row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png,info));
-  }
-    
-  png_read_image(png, row_pointers);
- 
-  
-  fclose(fp);
-
-  png_destroy_read_struct(&png, &info, NULL);
+void custom_warning_handler(png_structp png_ptr, png_const_charp warning_msg) {
+    // Do nothing, effectively ignoring the warning
 }
 
-void write_png_file(char *filename) {
-  int y;
+void read_png_file(char *filename, ImageData *img) {
+    FILE *fp = fopen(filename, "rb");
 
-  FILE *fp = fopen(filename, "wb");
-  if(!fp) abort();
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png) abort();
 
-  png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-  if (!png) abort();
+    png_set_error_fn(png, NULL, NULL, custom_warning_handler);
 
-  png_infop info = png_create_info_struct(png);
-  if (!info) abort();
+    png_infop info = png_create_info_struct(png);
+    if (!info) abort();
 
-  if (setjmp(png_jmpbuf(png))) abort();
+    if (setjmp(png_jmpbuf(png))) abort();
 
-  png_init_io(png, fp);
+    png_init_io(png, fp);
 
-  // Output is 8bit depth, RGBA format.
-  png_set_IHDR(
-    png,
-    info,
-    width, height,
-    8,
-    PNG_COLOR_TYPE_RGBA,
-    PNG_INTERLACE_NONE,
-    PNG_COMPRESSION_TYPE_DEFAULT,
-    PNG_FILTER_TYPE_DEFAULT
-  );
-  png_write_info(png, info);
+    png_read_info(png, info);
 
-  // To remove the alpha channel for PNG_COLOR_TYPE_RGB format,
-  // Use png_set_filler().
-  
+    img->width = png_get_image_width(png, info);
+    img->height = png_get_image_height(png, info);
+    img->color_type = png_get_color_type(png, info);
+    img->bit_depth = png_get_bit_depth(png, info);
 
-  if (!row_pointers) abort();
+    if (img->bit_depth == 16) png_set_strip_16(png);
+    if (img->color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+    if (img->color_type == PNG_COLOR_TYPE_GRAY && img->bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
+    if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+    if (img->color_type == PNG_COLOR_TYPE_RGB || img->color_type == PNG_COLOR_TYPE_GRAY || img->color_type == PNG_COLOR_TYPE_PALETTE)
+        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+    if (img->color_type == PNG_COLOR_TYPE_GRAY || img->color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png);
 
-  png_write_image(png, row_pointers);
-  png_write_end(png, NULL);
+    png_read_update_info(png, info);
 
-  // for(int y = 0; y < height; y++) {
-  //   free(row_pointers[y]);
-  // }
-  // free(row_pointers);
+    img->row_pointers = (png_bytep*)malloc(sizeof(png_bytep) * img->height);
+    for (int y = 0; y < img->height; y++) {
+        img->row_pointers[y] = (png_byte*)malloc(png_get_rowbytes(png, info));
+    }
 
-  fclose(fp);
+    png_read_image(png, img->row_pointers);
 
-  png_destroy_write_struct(&png, &info);
+    fclose(fp);
+    png_destroy_read_struct(&png, &info, NULL);
 }
 
+void write_png_file(char *filename, ImageData *img) {
+    FILE *fp = fopen(filename, "wb");
+    if (!fp) abort();
 
-void maskRGB(){
-    int size =  height * width;
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png) abort();
+
+    png_infop info = png_create_info_struct(png);
+    if (!info) abort();
+
+    if (setjmp(png_jmpbuf(png))) abort();
+
+    png_init_io(png, fp);
+
+    png_set_IHDR(
+        png,
+        info,
+        img->width, img->height,
+        8,
+        PNG_COLOR_TYPE_RGBA,
+        PNG_INTERLACE_NONE,
+        PNG_COMPRESSION_TYPE_DEFAULT,
+        PNG_FILTER_TYPE_DEFAULT
+    );
+    png_write_info(png, info);
+
+    png_write_image(png, img->row_pointers);
+    png_write_end(png, NULL);
+
+    fclose(fp);
+    png_destroy_write_struct(&png, &info);
+}
+
+void maskRGB(ImageData *img) {
+    int size = img->height * img->width;
     int maskD = maskDimensions * maskDimensions;
-    int averageR,averageG,averageB;
-    int *maskedImageR = (int*)malloc(size*sizeof(int));
-    int *maskedImageG = (int*)malloc(size*sizeof(int));
-    int *maskedImageB = (int*)malloc(size*sizeof(int));
-    for(int i=0;i<size;i++){
-         maskedImageB[i] = 0;
-         maskedImageG[i] = 0;
-         maskedImageB[i] = 0;
-    }
-    int val=0;
-    for(int i=0 ; i < height; i++)
-    {
+    int averageR, averageG, averageB;
 
-          for(int j=0 ; j < width ; j++)
-          {
+    int *maskedImageR = (int*)malloc(size * sizeof(int));
+    int *maskedImageG = (int*)malloc(size * sizeof(int));
+    int *maskedImageB = (int*)malloc(size * sizeof(int));
 
-                averageR = 0;
-                averageG = 0;
-                averageB = 0;
+    for (int i = 0; i < img->height; i++) {
+        for (int j = 0; j < img->width; j++) {
+            averageR = averageG = averageB = 0;
 
-              for(int itImageX = i - maskDimensions/2, itMaskX = 0; itImageX <= ( i+maskDimensions/2 ) && itMaskX < maskDimensions ;itImageX++,itMaskX++)
-              {
-                      if(itImageX>=0 && itImageX<=height){
-                        png_bytep row = row_pointers[itImageX];
-                        for(int itImageY = j - maskDimensions/2, itMaskY =0; itImageY <= (j+maskDimensions/2 ) && itMaskY < maskDimensions; itImageY++,itMaskY++)
-                        {
-                            png_bytep px = &(row[itImageY * 4]);
-                            if(itImageX >= 0 && itImageX < height && itImageY >= 0 && itImageY < width){
-                                      averageR += (px[0] * maskMatrix[itMaskX][itMaskY]);
-                                      averageG += (px[1] *maskMatrix[itMaskX][itMaskY]);
-                                      averageB += (px[2] *maskMatrix[itMaskX][itMaskY]);
-                            }
-                                
+            for (int itImageX = i - maskDimensions / 2, itMaskX = 0;
+                 itImageX <= (i + maskDimensions / 2) && itMaskX < maskDimensions;
+                 itImageX++, itMaskX++) {
+                if (itImageX >= 0 && itImageX < img->height) {
+                    png_bytep row = img->row_pointers[itImageX];
+                    for (int itImageY = j - maskDimensions / 2, itMaskY = 0;
+                         itImageY <= (j + maskDimensions / 2) && itMaskY < maskDimensions;
+                         itImageY++, itMaskY++) {
+                        png_bytep px = &(row[itImageY * 4]);
+                        if (itImageY >= 0 && itImageY < img->width) {
+                            averageR += px[0] * maskMatrix[itMaskX][itMaskY];
+                            averageG += px[1] * maskMatrix[itMaskX][itMaskY];
+                            averageB += px[2] * maskMatrix[itMaskX][itMaskY];
                         }
-                      }
-                    
-              } 
-              //storing Red
-                      if(averageR/maskD > 255)
-                        averageR = 255*maskD;
-                      else if(averageR/maskD < 0)
-                            averageR = 0;
-                      maskedImageR[i*width + j] = averageR/maskD;
-              
-              
-              //storing green 
-                        if(averageG/maskD> 255)
-                          averageG = 255*maskD;
-                        else if(averageG/maskD< 0)
-                              averageG = 0;
-                        maskedImageG[i*width + j] = averageG/maskD;
-
-
-              //storing blue
-                        if(averageB/maskD> 255)
-                          averageB = 255*maskD;
-                        else if(averageB/maskD< 0)
-                              averageB = 0;
-                        maskedImageB[i*width + j] = averageB/maskD;
-
-          }
+                    }
+                }
+            }
+            maskedImageR[i * img->width + j] = averageR / maskD;
+            maskedImageG[i * img->width + j] = averageG / maskD;
+            maskedImageB[i * img->width + j] = averageB / maskD;
+        }
     }
-   int x=0;
-    //storing to the image
-    for(int i=0;i<height;i++)
-    { 
-      png_bytep row = row_pointers[i];
-      for(int j=0;j<width;j++)
-      {
-        png_bytep px = &(row[j * 4]);
-        px[0] = maskedImageR[x];
-        px[1] = maskedImageG[x];
-        px[2] = maskedImageB[x];
-        x++;
-      }
+
+    int x = 0;
+    for (int i = 0; i < img->height; i++) {
+        png_bytep row = img->row_pointers[i];
+        for (int j = 0; j < img->width; j++) {
+            png_bytep px = &(row[j * 4]);
+            px[0] = maskedImageR[x];
+            px[1] = maskedImageG[x];
+            px[2] = maskedImageB[x];
+            x++;
+        }
     }
+
+    free(maskedImageR);
+    free(maskedImageG);
+    free(maskedImageB);
 }
 
-void process_png_file() 
-{
-  int x=0;
-  maskMatrix = (int**)malloc(maskDimensions*sizeof(int*));
-  for(int i=0;i<maskDimensions;i++){
-    maskMatrix[i] = (int*)malloc(maskDimensions*sizeof(int));
-  }
-  for(int i=0;i<maskDimensions;i++){
-    for(int j=0;j<maskDimensions;j++)
-      maskMatrix[i][j]=1;
-  }
-  maskRGB();
+void process_png_file(ImageData *img) {
+    maskMatrix = (int**)malloc(maskDimensions * sizeof(int*));
+    for (int i = 0; i < maskDimensions; i++) {
+        maskMatrix[i] = (int*)malloc(maskDimensions * sizeof(int));
+    }
+    for (int i = 0; i < maskDimensions; i++) {
+        for (int j = 0; j < maskDimensions; j++)
+            maskMatrix[i][j] = 1;
+    }
+    maskRGB(img);
 
+    for (int i = 0; i < maskDimensions; i++) {
+        free(maskMatrix[i]);
+    }
+    free(maskMatrix);
 }
 
 int main() {
     printf("\nEnter the size of Mask:\n");
     scanf("%d", &maskDimensions);
 
-    // Ensure the output directory exists
     system("mkdir -p BlurImages");
 
-    double startTime = omp_get_wtime();
+    double startReadTime = omp_get_wtime();
 
-    // Loop over image numbers 1 to 60
-    for (int i = 1; i <= 60; i++) {
+
+    for (int i = 0; i < IMAGESNO; i++) {
         char inputFilename[100];
-        char outputFilename[100];
-
-        // Construct input and output filenames
-        sprintf(inputFilename, "DataSet/%d.png", i);
-        sprintf(outputFilename, "BlurImages/%d.png", i);
-
-        // Read the input PNG file
-        read_png_file(inputFilename);
-
-        // Process the image
-        process_png_file();
-
-        // Write the processed image to the new folder
-        write_png_file(outputFilename);
+        sprintf(inputFilename, "DataSet/%d.png", i + 1);
+        read_png_file(inputFilename, &images[i]);
     }
 
-    free(maskMatrix);
+    double endReadTime = omp_get_wtime();
+    
+    printf("Time taken for Reading Images is %lf\n", endReadTime - startReadTime);
+    
+    double startProcessTime = omp_get_wtime();
+    
+    for (int i = 0; i < IMAGESNO; i++) {
+        process_png_file(&images[i]);
+    }
 
-    double endTime = omp_get_wtime();
-    printf("Time taken is %lf\n", endTime - startTime);
+    for (int i = 0; i < IMAGESNO; i++) {
+        char outputFilename[100];
+        sprintf(outputFilename, "BlurImages/%d.png", i + 1);
+        write_png_file(outputFilename, &images[i]);
 
+        // Free row pointers for each image after writing
+        for (int y = 0; y < images[i].height; y++) {
+            free(images[i].row_pointers[y]);
+        }
+        free(images[i].row_pointers);
+    }
+
+    double endProcessTime = omp_get_wtime();    
+    printf("Time taken for Bluring Images: %lf\n", endProcessTime - startProcessTime);
+
+    printf("Total Time taken: %lf\n", (endProcessTime - startProcessTime) + (endReadTime - startReadTime));
     return 0;
 }
+
