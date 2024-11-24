@@ -4,8 +4,7 @@
 #include <png.h>
 #include <omp.h>
 
-#define IMAGESNO 300
-#define BATCH_SIZE 100 // Number of images to process in one batch
+#define IMAGESNO 1500
 
 typedef struct {
     int width;
@@ -16,12 +15,13 @@ typedef struct {
 } ImageData;
 
 int maskDimensions;
+int brightnessLevel;
 int **maskMatrix;
 
-// Suppress PNG warnings
+//surpass PNG lirary warnings
 void custom_warning_handler(png_structp png_ptr, png_const_charp warning_msg) {}
 
-// Free allocated image data
+// free allocated image data to get safe from excessive use of memeory
 void free_image_data(ImageData *img) {
     if (!img || !img->row_pointers) return;
     free(img->row_pointers[0]);
@@ -29,14 +29,14 @@ void free_image_data(ImageData *img) {
     img->row_pointers = NULL;
 }
 
-// Copy image data to a new structure
+// deeo copy method(image data to a new structure) 
 void copy_image_data(ImageData *src, ImageData *dest) {
     dest->width = src->width;
     dest->height = src->height;
     dest->color_type = src->color_type;
     dest->bit_depth = src->bit_depth;
 
-    size_t row_size = dest->width * 4; // Assuming RGBA
+    size_t row_size = dest->width * 4; 
     dest->row_pointers = (png_bytep *)malloc(sizeof(png_bytep) * dest->height);
     png_bytep pixel_data = (png_bytep)malloc(row_size * dest->height);
 
@@ -47,7 +47,7 @@ void copy_image_data(ImageData *src, ImageData *dest) {
     }
 }
 
-// Initialize the mask matrix in parallel
+// initializing the mask matrix in parallel for blur
 void initialize_mask() {
     maskMatrix = (int **)malloc(maskDimensions * sizeof(int *));
     #pragma omp parallel for
@@ -60,7 +60,7 @@ void initialize_mask() {
     }
 }
 
-// Read a PNG image
+//reading PNG image file from source folder
 void read_png_file(char *filename, ImageData *img) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
@@ -100,7 +100,7 @@ void read_png_file(char *filename, ImageData *img) {
     png_destroy_read_struct(&png, &info, NULL);
 }
 
-// Write a PNG image
+//write the filteredImage file into the respective folder
 void write_png_file(char *filename, ImageData *img) {
     FILE *fp = fopen(filename, "wb");
     png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -114,9 +114,9 @@ void write_png_file(char *filename, ImageData *img) {
     png_destroy_write_struct(&png, &info);
 }
 
-// Invert image colors in parallel
+//negate the colors of images
 void invert_colors(ImageData *img) {
-    #pragma omp parallel for collapse(2) // Combine two loops
+    #pragma omp parallel for collapse(2)
     for (int y = 0; y < img->height; y++) {
         for (int x = 0; x < img->width; x++) {
             png_bytep px = &(img->row_pointers[y][x * 4]);
@@ -127,7 +127,7 @@ void invert_colors(ImageData *img) {
     }
 }
 
-// Add a brightness filter
+//brightness filter as per user's requirements
 void adjust_brightness(ImageData *img, int brightness) {
     #pragma omp parallel for collapse(2) schedule(dynamic, 4)
     for (int y = 0; y < img->height; y++) {
@@ -140,7 +140,7 @@ void adjust_brightness(ImageData *img, int brightness) {
     }
 }
 
-// Add a grayscale filter
+//gray scal filter 
 void apply_grayscale(ImageData *img) {
     #pragma omp parallel for collapse(2)
     for (int y = 0; y < img->height; y++) {
@@ -152,6 +152,7 @@ void apply_grayscale(ImageData *img) {
     }
 }
 
+// masking images for blur
 void maskRGB(ImageData *img) {
     int maskD = maskDimensions * maskDimensions;
     int size = img->height * img->width;
@@ -207,16 +208,21 @@ void maskRGB(ImageData *img) {
     free(maskedImageB);
 }
 
-// Main function with batch-level parallelism
-#include <omp.h> // For time calculation and parallelization
-#include <stdio.h> // For printf
-#include <stdlib.h> // For system commands
+
+#include <omp.h>
+#include <stdio.h> 
+#include <stdlib.h> 
 
 int main() {
-    omp_set_num_threads(8); // Set the number of threads
+    omp_set_num_threads(2);
+    printf("Dataset size:  %d\n",IMAGESNO );
+    printf("NO of threads : %d\n",omp_get_num_threads());
+    
     char *fileDirectory = "../DataSet";
+
     char command[256];
     snprintf(command, sizeof(command), "test -d \"%s\"", fileDirectory);
+
     if (system(command)) {
         printf("DataSet Doesn't exist\n");
         return 1;
@@ -225,6 +231,10 @@ int main() {
     printf("Enter the size of Mask:\n");
     scanf("%d", &maskDimensions);
 
+    printf("Enter the Brightness Level:\n");
+    scanf("%d",&brightnessLevel);
+
+
     // Start timer
     double start_time = omp_get_wtime();
 
@@ -232,7 +242,7 @@ int main() {
     initialize_mask();
 
 
-    #pragma omp parallel for schedule(static, 2)
+    #pragma omp parallel for schedule(static)
     for (int i = 0; i < IMAGESNO; i++) {
         ImageData img;
         char inputFile[100];
@@ -256,7 +266,7 @@ int main() {
         {
             ImageData brightness_img;
             copy_image_data(&img, &brightness_img);
-            adjust_brightness(&brightness_img, 20);
+            adjust_brightness(&brightness_img, brightnessLevel);
             char outputFile[100];
             sprintf(outputFile, "BrightnessImages/%d.png", i + 1);
             write_png_file(outputFile, &brightness_img);
@@ -289,9 +299,10 @@ int main() {
 
 
     // End timer
-    double end_time = omp_get_wtime();
+    double execution_time = omp_get_wtime() - start_time;
     printf("Image Processing Done!\n");
-    printf("Total Time Taken: %.2f seconds\n", end_time - start_time);
+    printf("Total Time Taken: %.2f seconds\n ", execution_time);
+    printf("Total Time Taken: %.2f minutes\n ", execution_time / 60.0);
 
     return 0;
 }
